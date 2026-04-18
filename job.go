@@ -17,7 +17,7 @@ type Job interface {
 	Publish(ctx context.Context, msg []byte, options ...PublishOption) error
 }
 
-type JobHandler func(ctx context.Context, msg []byte) error
+type JobHandler func(ctx context.Context, msg amqp.Delivery) error
 
 type job struct {
 	messages    <-chan amqp.Delivery
@@ -57,7 +57,9 @@ func (j *job) Consume(ctxTimeout time.Duration) error {
 		for !exit {
 			select {
 			case <-j.shutdown:
-				err = j.channel.Cancel(consumer, false)
+				if err := j.channel.Cancel(consumer, false); err != nil {
+					logger.Error("error in cancelling consumer", zap.Error(err))
+				}
 				shutdown = true
 
 			case msg := <-j.messages:
@@ -67,15 +69,17 @@ func (j *job) Consume(ctxTimeout time.Duration) error {
 				}
 
 				if len(msg.Body) == 0 {
-					msg.Ack(true)
+					if err := msg.Ack(false); err != nil {
+						logger.Error("error in sending ack for empty message", zap.Error(err))
+					}
 					continue
 				}
 
 				ctx := context.Background()
 				ctx, cancel := context.WithTimeout(ctx, ctxTimeout)
-				err = j.handler(ctx, msg.Body)
-				if err != nil {
-					logger.Error("error in running RabbitMQ handler", zap.Error(err), zap.Any("body", msg.Body))
+				handlerErr := j.handler(ctx, msg)
+				if handlerErr != nil {
+					logger.Error("error in running RabbitMQ handler", zap.Error(handlerErr), zap.Any("body", msg.Body))
 				} else {
 					logger.Debug("job running successfully")
 				}
@@ -83,17 +87,14 @@ func (j *job) Consume(ctxTimeout time.Duration) error {
 				cancel()
 
 				if !j.autoAck {
-					if err != nil {
-						err := msg.Nack(false, true)
-						if err != nil {
+					if handlerErr != nil {
+						if err := msg.Nack(false, true); err != nil {
 							logger.Error("error in sending nack", zap.Error(err))
 						}
 					} else {
-						err := msg.Ack(true)
-						if err != nil {
+						if err := msg.Ack(false); err != nil {
 							logger.Error("error in sending ack", zap.Error(err))
 						}
-						break
 					}
 				}
 			}

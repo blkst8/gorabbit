@@ -45,7 +45,7 @@ func NewRabbitMQ(
 	InitLogger(logLevel)
 
 	if dialTimeout == 0 {
-		dialTimeout = 5
+		dialTimeout = 5 * time.Second
 	}
 
 	if ctxTimeout == 0 {
@@ -92,11 +92,9 @@ func (r *rabbitMQ) Connect() error {
 		}
 	}
 
-	if r.channel == nil {
-		r.channel, err = r.conn.Channel()
-		if err != nil {
-			return fmt.Errorf("failed to open a RabbitMQ channel: %s", err)
-		}
+	r.channel, err = r.conn.Channel()
+	if err != nil {
+		return fmt.Errorf("failed to open a RabbitMQ channel: %s", err)
 	}
 
 	go func() {
