@@ -1,4 +1,4 @@
-module github.com/n25a/gorabbit
+module github.com/blkst8/gorabbit
 
 go 1.21.5
 
